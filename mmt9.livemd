@@ -1,4 +1,4 @@
-<!-- livebook:{"file_entries":[{"name":"d4rb.txt","type":"attachment"},{"name":"satellite_1933.txt","type":"attachment"},{"name":"satellite_292.txt","type":"attachment"},{"name":"satellite_4769.txt","type":"attachment"}]} -->
+<!-- livebook:{"file_entries":[{"name":"delta_iv_rb.txt","type":"attachment"}]} -->
 
 # Magnitude Distribution
 
