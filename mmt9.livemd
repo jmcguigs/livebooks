@@ -1,0 +1,75 @@
+# Magnitude Distribution
+
+```elixir
+Mix.install([{:tucan, "~> 0.4.1"}, {:kino_vega_lite, "~> 0.1.8"}])
+```
+
+## Extracting EO Observations From MMT9 Data
+
+### MMT9 Data
+
+MMT9 is a Russian optical network that collects high-rate photometry on LEO satellites. Data can be found at http://mmt.favor2.info/satellites
+
+```elixir
+defmodule MMT9Parser do
+  def parse_line(line) do
+    # data format | Date Time StdMag Mag Filter Penumbra Distance Phase Channel Track
+    fields = String.split(line)
+    try do
+      {:ok, datetime, 0} = DateTime.from_iso8601(Enum.at(fields, 0) <> "T" <> Enum.at(fields, 1) <> "Z")
+      %{
+        epoch: datetime,
+        std_mag: String.to_float(Enum.at(fields, 2)),
+        raw_mag: String.to_float(Enum.at(fields, 3)),
+        phase: String.to_float(Enum.at(fields, 7))
+      }
+    rescue
+      ArgumentError -> nil
+      MatchError -> nil
+    end
+  end
+
+  def group_obs_by_month_and_phase(obs, month, phase_min, phase_max) do
+    mags = obs
+    |> Enum.filter(fn o -> o.epoch.month == month && o.phase < phase_max && o.phase> phase_min end)
+    |> Enum.map(fn k -> k.std_mag end)
+    |> Enum.reject(&is_nil(&1))
+    if length(mags) == 0 do
+      nil
+    else
+      %{
+        month: month,
+        phase: phase_min,
+        avg_mag: Enum.sum(mags) / length(mags)
+      }
+    end
+  end
+end
+
+
+file_path = ""
+
+{:ok, text} = File.read(file_path)
+
+# split by line- each data point is on its own line
+lines = text |> String.split("\n") |> Enum.drop(7) # first 7 lines are header data
+
+eo_obs = Enum.map(lines, fn line -> Task.async(MMT9Parser, :parse_line, [line]) end)
+|> Enum.map(&Task.await(&1))
+|> Enum.reject(&is_nil(&1))
+
+IO.puts("Parsed data file of #{length(eo_obs)} lines")
+
+# now group data by month & phase (1deg bins)
+grouped_eo_obs = Enum.flat_map(1..12, fn mo ->
+  for p <- 0..35 do
+    Task.async(MMT9Parser, :group_obs_by_month_and_phase, [eo_obs, mo, p * 5, p * 5 + 5])
+  end
+  |> Enum.map(&Task.await(&1, :infinity))
+  |> Enum.reject(&is_nil(&1))
+end
+)
+
+
+Tucan.heatmap(grouped_eo_obs, "month", "phase", "avg_mag")
+```
