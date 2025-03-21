@@ -1,3 +1,5 @@
+<!-- livebook:{"file_entries":[{"name":"d4rb.txt","type":"attachment"},{"name":"satellite_1933.txt","type":"attachment"},{"name":"satellite_292.txt","type":"attachment"},{"name":"satellite_4769.txt","type":"attachment"}]} -->
+
 # Magnitude Distribution
 
 ```elixir
@@ -31,9 +33,9 @@ defmodule MMT9Parser do
 
   def group_obs_by_month_and_phase(obs, month, phase_min, phase_max) do
     mags = obs
-    |> Enum.filter(fn o -> o.epoch.month == month && o.phase < phase_max && o.phase> phase_min end)
-    |> Enum.map(fn k -> k.std_mag end)
-    |> Enum.reject(&is_nil(&1))
+      |> Enum.filter(fn o -> o.epoch.month == month && o.phase < phase_max && o.phase> phase_min end)
+      |> Enum.map(fn k -> k.raw_mag end)
+      |> Enum.reject(&is_nil(&1))
     if length(mags) == 0 do
       nil
     else
@@ -43,6 +45,14 @@ defmodule MMT9Parser do
         avg_mag: Enum.sum(mags) / length(mags)
       }
     end
+  end
+
+  def group_obs_by_phase(obs, phase_min, phase_max) do
+    center_phase = (phase_min + phase_max) / 2
+    obs
+      |> Enum.filter(fn o -> o.phase < phase_max && o.phase > phase_min end)
+      |> Enum.map(fn k -> %{std_mag: k.std_mag, phase: center_phase} end)
+      |> Enum.reject(&is_nil(&1.std_mag))
   end
 end
 
@@ -55,8 +65,8 @@ file_path = ""
 lines = text |> String.split("\n") |> Enum.drop(7) # first 7 lines are header data
 
 eo_obs = Enum.map(lines, fn line -> Task.async(MMT9Parser, :parse_line, [line]) end)
-|> Enum.map(&Task.await(&1))
-|> Enum.reject(&is_nil(&1))
+  |> Enum.map(&Task.await(&1))
+  |> Enum.reject(&is_nil(&1))
 
 IO.puts("Parsed data file of #{length(eo_obs)} lines")
 
@@ -70,6 +80,31 @@ grouped_eo_obs = Enum.flat_map(1..12, fn mo ->
 end
 )
 
+obs_by_phase = Enum.map(0..179, fn p ->
+  Task.async(MMT9Parser, :group_obs_by_phase, [eo_obs, p, p + 1])
+end)
+|> Enum.flat_map(&Task.await(&1, :infinity))
+|> Enum.reject(&is_nil(&1))
 
-Tucan.heatmap(grouped_eo_obs, "month", "phase", "avg_mag")
+# full raw distribution
+multivariate = Tucan.heatmap(grouped_eo_obs, "month", "phase", "avg_mag")
+  |> Tucan.set_title("Std. Magnitude by Time of Year & Phase Angle")
+  |> Tucan.set_height(600)
+  |> Tucan.set_width(400)
+
+# "photometric signature"
+univariate = Tucan.density(eo_obs, "std_mag")
+  |> Tucan.set_title("Normalized Magnitude Distribution")
+  |> Tucan.set_height(600)
+  |> Tucan.set_width(600)
+
+# std. mag over phase- deviations from flat line indicate error from lambertian sphere normalization,
+# error/stdev indicates variability (likely due to intrinsic rotation)
+phaseplot = Tucan.errorband(obs_by_phase, "phase", "std_mag")
+  |> Tucan.set_title("Std. Mag Over Solar Phase Angle")
+  |> Tucan.set_height(400)
+  |> Tucan.set_width(1000)
+
+distributions = Tucan.hconcat([univariate, multivariate])
+Tucan.vconcat([distributions, phaseplot])
 ```
